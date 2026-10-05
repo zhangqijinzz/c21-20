@@ -166,9 +166,14 @@ export function useLatencyLab() {
 
   const duplicateActive = useCallback(() => {
     const current = documentRef.current;
-    if (current && activeProject)
-      commit(duplicateProject(current, activeProject), "editing");
-  }, [activeProject, commit]);
+    if (!current) return;
+    // 以最近一次已提交的工作区为准，即使源项目正排在保存队列里也能稳定复制。
+    const source =
+      current.projects.find(
+        (project) => project.id === current.activeProjectId,
+      ) ?? current.projects[0];
+    if (source) commit(duplicateProject(current, source), "editing");
+  }, [commit]);
 
   const deleteProject = useCallback(
     (id: string) => {

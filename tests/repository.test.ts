@@ -69,21 +69,62 @@ describe("project repository recovery", () => {
     expect(loaded.recovered).toBe(true);
   });
 
-  it("keeps a local recovery copy when IndexedDB saving fails", async () => {
+  it("still opens older copies that were saved without scenario snapshots", async () => {
     const storage = new MemoryStorage();
-    storage.failWrite = true;
-    const repository = new ProjectRepository(storage);
-    const document: WorkspaceDocument = {
+    const legacyCopy = {
+      ...structuredClone(EXAMPLE_PROJECT),
+      id: "project-legacy-copy",
+      title: `${EXAMPLE_PROJECT.title} · 副本`,
+      // 旧版本复制出来的项目：快照字段为空数组，节点 id 已重新生成。
+      scenarios: [],
+      nodes: EXAMPLE_PROJECT.nodes.map((node, index) => ({
+        ...node,
+        id: `legacy-node-${index}`,
+        dependencyIds: node.dependencyIds.map(
+          (id) =>
+            `legacy-node-${EXAMPLE_PROJECT.nodes.findIndex(
+              (item) => item.id === id,
+            )}`,
+        ),
+        fallbackNodeId: node.fallbackNodeId
+          ? `legacy-node-${EXAMPLE_PROJECT.nodes.findIndex(
+              (item) => item.id === node.fallbackNodeId,
+            )}`
+          : undefined,
+      })),
+    };
+    storage.value = {
+      version: 1,
+      activeProjectId: legacyCopy.id,
+      projects: [legacyCopy],
+    };
+    const loaded = await new ProjectRepository(storage).load();
+    expect(loaded.recovered).toBe(false);
+    const project = loaded.document.projects[0];
+    expect(project?.scenarios).toEqual([]);
+    expect(project?.nodes).toHaveLength(EXAMPLE_PROJECT.nodes.length);
+    // 旧副本的依赖与降级连线仍然闭合，可以继续编辑与推演。
+    const ids = new Set(project?.nodes.map((node) => node.id));
+    expect(
+      project?.nodes.every((node) =>
+        node.dependencyIds.every((id) => ids.has(id)),
+      ),
+    ).toBe(true);
+    expect(
+      project?.nodes.every(
+        (node) => !node.fallbackNodeId || ids.has(node.fallbackNodeId),
+      ),
+    ).toBe(true);
+  });
+
+  it("recovers when a stored project is missing the scenarios field entirely", async () => {
+    const storage = new MemoryStorage();
+    storage.value = {
       version: 1,
       activeProjectId: EXAMPLE_PROJECT.id,
-      projects: [structuredClone(EXAMPLE_PROJECT)],
+      projects: [{ ...structuredClone(EXAMPLE_PROJECT), scenarios: undefined }],
     };
-    await expect(repository.save(document)).rejects.toThrow(
-      "IndexedDB quota failure",
-    );
-    storage.failWrite = false;
-    const loaded = await repository.load();
-    expect(loaded.document.projects[0]?.id).toBe(EXAMPLE_PROJECT.id);
-    expect(loaded.recovered).toBe(true);
+    const loaded = await new ProjectRepository(storage).load();
+    expect(loaded.document.projects[0]?.scenarios).toEqual([]);
   });
 });
