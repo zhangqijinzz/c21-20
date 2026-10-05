@@ -69,6 +69,45 @@ describe("project repository recovery", () => {
     expect(loaded.recovered).toBe(true);
   });
 
+  it("still opens older copies that were saved without any snapshots", async () => {
+    const storage = new MemoryStorage();
+    const legacyCopy = {
+      id: "project-legacy-copy",
+      title: `${EXAMPLE_PROJECT.title} · 副本`,
+      nodes: [
+        {
+          ...EXAMPLE_PROJECT.nodes[0],
+          id: "copy-node-a",
+          dependencyIds: [],
+          fallbackNodeId: undefined,
+        },
+        {
+          ...EXAMPLE_PROJECT.nodes[1],
+          id: "copy-node-b",
+          dependencyIds: ["copy-node-a"],
+          fallbackNodeId: undefined,
+        },
+      ],
+      concurrencyLimit: null,
+      // 早于“快照随副本继承”这次改动的副本：快照数组为空，也缺少新结构。
+      scenarios: [],
+      createdAt: 1,
+      updatedAt: 2,
+    };
+    storage.value = {
+      version: 1,
+      activeProjectId: "project-legacy-copy",
+      projects: [legacyCopy],
+    };
+    const loaded = await new ProjectRepository(storage).load();
+    expect(loaded.recovered).toBe(false);
+    const project = loaded.document.projects[0];
+    expect(project?.id).toBe("project-legacy-copy");
+    expect(project?.nodes).toHaveLength(2);
+    expect(project?.scenarios).toEqual([]);
+    expect(project?.nodes[1]?.dependencyIds).toEqual(["copy-node-a"]);
+  });
+
   it("keeps a local recovery copy when IndexedDB saving fails", async () => {
     const storage = new MemoryStorage();
     storage.failWrite = true;
